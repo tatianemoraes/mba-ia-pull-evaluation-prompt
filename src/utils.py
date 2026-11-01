@@ -8,8 +8,17 @@ import json
 from typing import Dict, Any, Optional
 from pathlib import Path
 from dotenv import load_dotenv
+from langchain_core.rate_limiters import InMemoryRateLimiter
 
 load_dotenv()
+
+# Shared by every Gemini chat model instance, including the evaluator created
+# per metric. At 15 requests/minute this stays under common free-tier RPM caps.
+_GOOGLE_RATE_LIMITER = InMemoryRateLimiter(
+    requests_per_second=0.25,
+    check_every_n_seconds=0.1,
+    max_bucket_size=1,
+)
 
 
 def load_yaml(file_path: str) -> Optional[Dict[str, Any]]:
@@ -74,7 +83,9 @@ def check_env_vars(required_vars: list) -> bool:
     missing_vars = []
 
     for var in required_vars:
-        if not os.getenv(var):
+        value = (os.getenv(var) or "").strip()
+        placeholder_markers = ("<", ">", "your_", "your-", "sua_", "sua-", "placeholder", "changeme", "replace_me")
+        if not value or any(marker in value.lower() for marker in placeholder_markers):
             missing_vars.append(var)
 
     if missing_vars:
@@ -225,11 +236,17 @@ def get_llm(model: Optional[str] = None, temperature: float = 0.0):
                 "Obtenha uma chave em: https://aistudio.google.com/app/apikey"
             )
 
-        return ChatGoogleGenerativeAI(
-            model=model_name,
-            temperature=temperature,
-            google_api_key=api_key
-        )
+        google_kwargs = {
+            "model": model_name,
+            "google_api_key": api_key,
+            "rate_limiter": _GOOGLE_RATE_LIMITER,
+            "max_retries": 5,
+        }
+        # Gemini 3.5 Flash-Lite uses fixed sampling defaults; sending
+        # temperature is ignored by the provider and produces a warning.
+        if model_name != "gemini-3.5-flash-lite":
+            google_kwargs["temperature"] = temperature
+        return ChatGoogleGenerativeAI(**google_kwargs)
 
     else:
         raise ValueError(

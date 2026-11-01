@@ -22,12 +22,16 @@ wheels/
 
 # Virtual Environment
 venv/
+.venv/
 env/
 ENV/
 
 # Environment variables
 .env
 .env.local
+
+# Docker local state
+.docker/
 
 # IDE
 .vscode/

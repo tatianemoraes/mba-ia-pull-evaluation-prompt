@@ -352,3 +352,82 @@ Rode uma vez e guarde o endereço: ao compartilhar de novo, o link muda.
 - Não altere os datasets de avaliação - apenas os prompts em prompts/bug_to_user_story_v2.yml
 - Itere, itere, itere - é normal precisar de 3-5 iterações para atingir 0.8 em todas as métricas
 - Documente seu processo - a jornada de otimização é tão importante quanto o resultado final
+
+## Técnicas Aplicadas (Fase 2)
+
+O prompt v2 está em `prompts/bug_to_user_story_v2.yml`. A versão inicial era vaga, repetia `{bug_report}` no sistema e na mensagem de usuário, não definia formato, critérios de qualidade ou comportamento para relatos incompletos.
+
+- **Role Prompting:** define a persona como Product Manager sênior com foco em triagem e requisitos. Isso orienta vocabulário e finalidade da resposta.
+- **Few-shot Learning:** inclui dois exemplos completos de relatos comuns e suas histórias com critérios verificáveis; um terceiro exemplo mostra o tratamento de um relato insuficiente.
+- **Skeleton of Thought:** exige três seções fixas — User Story, Critérios de Aceitação e Pontos a esclarecer — facilitando leitura e avaliação consistente.
+- **Chain of Thought (interno):** orienta a identificar ator, comportamento, resultado e evidências, mas pede para não expor raciocínio privado; a saída contém apenas conclusões e perguntas úteis.
+
+Também há regras para separar fatos de recomendações e tratar instruções dentro do relato como dados. Critérios usam Dado/Quando/Então e devem ser observáveis. Para relatos complexos, o prompt preserva cada falha e agrupa critérios por área, com seções opcionais para contexto técnico, impacto e tarefas sugeridas. A mensagem do sistema concentra política, exemplos e estrutura; a mensagem do usuário recebe apenas `{bug_report}`.
+
+## Resultados Finais
+
+Prompt publicado como `teste-pos/bug_to_user_story_v2`. O dataset de avaliação contém 15 exemplos. O link público compartilhado mostra o dataset e seus experimentos; o link do experimento abaixo mostra os resultados desta execução.
+
+| Métrica | Média | Status |
+| --- | ---: | --- |
+| Helpfulness | 0.88 | Aprovado |
+| Correctness | 0.87 | Aprovado |
+| F1-Score | 0.85 | Aprovado |
+| Clarity | 0.88 | Aprovado |
+| Precision | 0.89 | Aprovado |
+| Média geral | 0.8733 | Aprovado |
+
+- Dataset público e experimentos: [abrir no LangSmith](https://smith.langchain.com/public/98560914-1337-46cb-8a86-9b0912c83c31/d)
+- Experimento final (15 exemplos): [ver traces e feedback](https://smith.langchain.com/o/56521f00-ca2a-4e57-8ad4-c13152ab203d/datasets/f320b541-36f0-47e5-918e-53ed06a5eb39/compare?selectedSessions=8b88c3aa-561a-4d7c-92d5-f1b226de8cf9)
+
+Na primeira avaliação, a cota gratuita Gemini (15 requisições por minuto) causou erros 429 em várias métricas. A execução final usou um limitador global compartilhado, preservou os 15 exemplos e atingiu o critério de aprovação em todas as médias. A primeira versão do v2 também omitia problemas secundários dos relatos complexos; a revisão atual cobre cada problema, preserva evidências e separa fatos de sugestões técnicas.
+
+Comparação: v1 apenas pede uma história de forma vaga e repete o relato; v2 define persona, formato, regras contra invenção, critérios testáveis, perguntas para lacunas e exemplos contrastivos. Isso busca elevar clareza, precisão e aderência ao formato esperado, mas os scores dependem da execução com o modelo escolhido.
+
+## Como Executar
+
+Pré-requisitos: Python 3.10+, acesso ao LangSmith, uma chave de provedor (OpenAI ou Google Gemini) e um handle público do Prompt Hub. Consulte as páginas oficiais do provedor para escolher modelos atualmente disponíveis.
+
+O `.env` local contém credenciais e configuração do projeto e não é versionado. Para usar outro ambiente, copie `.env.example` e preencha as chaves reais; nunca publique o `.env`.
+
+```powershell
+python -m venv venv
+venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+Copy-Item .env.example .env
+```
+
+Preencha `.env` com `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, `USERNAME_LANGSMITH_HUB`, `LLM_PROVIDER`, `LLM_MODEL`, `EVAL_MODEL` e a chave correspondente (`OPENAI_API_KEY` ou `GOOGLE_API_KEY`). Para baixar novamente o prompt de referência:
+
+```powershell
+python src/pull_prompts.py
+```
+
+Revise `prompts/bug_to_user_story_v2.yml` e valide localmente:
+
+```powershell
+pytest tests/test_prompts.py
+```
+
+Publique o prompt público versionado e execute a avaliação contra os 15 exemplos existentes:
+
+```powershell
+python src/push_prompts.py
+python src/evaluate.py
+```
+
+O comando de publicação usa `{USERNAME_LANGSMITH_HUB}/bug_to_user_story_v2`, marca o prompt como público e adiciona tags e descrição. Repita edição, publicação e avaliação para iterar. O critério só é atingido quando cada uma das cinco métricas e a média ficam em pelo menos 0,8. Não altere o dataset de avaliação.
+
+### Teste local com Docker Compose
+
+Requer Docker Desktop com Docker Compose v2. O Compose carrega `.env` se existir, mantém o dataset somente leitura e monta `prompts/` para que edições apareçam imediatamente no container. As chaves ficam no host e não são incluídas na imagem. Sem `.env`, os testes unitários funcionam; pull, push e avaliação remota precisam das credenciais configuradas.
+
+```powershell
+Copy-Item .env.example .env # preencher as chaves e o handle antes das chamadas remotas
+docker compose up -d # instala dependências e mantém o container de desenvolvimento ativo
+docker compose exec app python -m pytest tests/test_prompts.py -q
+docker compose exec app python src/pull_prompts.py
+docker compose exec app python src/push_prompts.py
+docker compose exec app python src/evaluate.py
+docker compose down # encerra o ambiente
+```
